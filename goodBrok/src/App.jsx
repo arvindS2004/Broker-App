@@ -8,7 +8,8 @@ import logoImage from './assets/logot.png';
 
 const API_KEY = import.meta.env.VITE_MARKETSTACK_API_KEY;
 
-const BASE_URL = "http://api.marketstack.com/v1";
+const BASE_URL = "https://broker-app-backend.onrender.com/api";
+
 
 export default function StockGuidanceApp() {
   const [symbol, setSymbol] = useState('');
@@ -30,9 +31,8 @@ export default function StockGuidanceApp() {
       setError('');
       
       
-      const latestResponse = await fetch(
-        `${BASE_URL}/eod/latest?access_key=${API_KEY}&symbols=${stockSymbol}`
-      );
+      const latestResponse = await fetch(`${BASE_URL}/stocks?symbols=${stockSymbol}`);
+
       
       if (!latestResponse.ok) {
         throw new Error('Failed to fetch the latest stock data');
