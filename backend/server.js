@@ -1,23 +1,20 @@
-// backend/server.js
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const rateLimit = require('axios-rate-limit');
+import dotenv from "dotenv";
 require("dotenv").config();
 
 const PORT = process.env.PORT || 5000;
 
 const app = express();
-// Marketstack API key from env var
 const API_KEY = process.env.MARKETSTACK_API_KEY;
 if (!API_KEY) {
   console.warn('Warning: MARKETSTACK_API_KEY is not set. Requests will fail.');
 }
 
-// Keep Marketstack HTTP base (free tier uses HTTP)
 const BASE_URL = 'http://api.marketstack.com/v1';
 
-// Configure axios with rate limiting
 const http = rateLimit(axios.create({
   headers: {
     'User-Agent': 'TrueDalal/1.0 (+https://yourdomain.example)',
@@ -45,10 +42,9 @@ const retryRequest = async (fn, retries = 3, delay = 2000) => {
   }
 };
 
-app.use(cors()); // you may restrict this later to your frontend URL
+app.use(cors({ origin: "*" })); 
 app.use(express.json());
 
-// Proxy endpoint example: fetch EOD for one symbol
 app.get('/api/eod/latest', async (req, res) => {
   const { symbols } = req.query;
   if (!symbols) return res.status(400).json({ error: 'symbols query parameter required' });
@@ -66,7 +62,6 @@ app.get('/api/eod/latest', async (req, res) => {
   }
 });
 
-// Example endpoint that matches your original /api/stocks (7-day history + tickers)
 app.get('/api/stocks', async (req, res) => {
   const { symbols } = req.query;
   if (!symbols) return res.status(400).json({ error: 'symbols query parameter required' });

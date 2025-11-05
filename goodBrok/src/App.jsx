@@ -1,15 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Search, TrendingUp, TrendingDown, RefreshCw, AlertTriangle, Activity, DollarSign, BarChart2 } from 'lucide-react';
 import './App.css';
 import StockTypesInfo from './components/StockTypesInfo';
 import PopularStockCategories from './components/PopularStockCategories';
 import logoImage from './assets/logot.png';
 
-
-const API_KEY = import.meta.env.VITE_MARKETSTACK_API_KEY;
-
-const BASE_URL = "https://broker-app-backend.onrender.com/api";
-
+const BASE_URL = "https://broker-app-backend.onrender.com/api"; 
 
 export default function StockGuidanceApp() {
   const [symbol, setSymbol] = useState('');
@@ -29,50 +25,40 @@ export default function StockGuidanceApp() {
     try {
       setLoading(true);
       setError('');
-      
-      
-      const latestResponse = await fetch(`${BASE_URL}/stocks?symbols=${stockSymbol}`);
 
-      
-      if (!latestResponse.ok) {
-        throw new Error('Failed to fetch the latest stock data');
-      }
-      
-      const latestData = await latestResponse.json();
-      
-      if (!latestData.data || latestData.data.length === 0) {
+      // Single call to your backend
+      const response = await fetch(`${BASE_URL}/stocks?symbols=${stockSymbol}`);
+      if (!response.ok) throw new Error('Failed to fetch stock data');
+
+      const data = await response.json();
+
+      if (!data || !data.eodData || data.eodData.length === 0) {
         throw new Error('No data found for this symbol');
       }
-      
-      const today = new Date();
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(today.getDate() - 30);
-      
-      const historyResponse = await fetch(
-        `${BASE_URL}/eod?access_key=${API_KEY}&symbols=${stockSymbol}&date_from=${thirtyDaysAgo.toISOString().split('T')[0]}&date_to=${today.toISOString().split('T')[0]}`
+
+      // Extract from backend structure
+      const tickerData = data.tickerData?.[0] || {};
+      const eodData = data.eodData || [];
+
+      const sortedHistory = eodData.sort(
+        (a, b) => new Date(a.date) - new Date(b.date)
       );
-      
-      if (!historyResponse.ok) {
-        throw new Error('Failed to fetch historical stock data');
-      }
-      
-      const historyData = await historyResponse.json();
-      
-      if (!historyData.data || historyData.data.length === 0) {
-        throw new Error('No historical data found for this symbol');
-      }
-      
-      const sortedHistory = historyData.data.sort((a, b) => 
-        new Date(a.date) - new Date(b.date)
-      );
-      
-      setStockData(latestData.data[0]);
+
+      setStockData({
+        symbol: tickerData.symbol || stockSymbol,
+        date: sortedHistory[sortedHistory.length - 1].date,
+        open: sortedHistory[sortedHistory.length - 1].open,
+        close: sortedHistory[sortedHistory.length - 1].close,
+        high: sortedHistory[sortedHistory.length - 1].high,
+        low: sortedHistory[sortedHistory.length - 1].low,
+        volume: sortedHistory[sortedHistory.length - 1].volume,
+      });
+
       setHistory(sortedHistory);
-      
-      generateRecommendation(sortedHistory, latestData.data[0]);
-      
+
+      generateRecommendation(sortedHistory, sortedHistory[sortedHistory.length - 1]);
       updateRecentSearches(stockSymbol);
-      
+
     } catch (err) {
       setError(err.message || 'Failed to fetch stock data');
       setStockData(null);
@@ -96,132 +82,79 @@ export default function StockGuidanceApp() {
     const shortTermMA = calculateMA(history.slice(-5));
     const mediumTermMA = calculateMA(history.slice(-14));
     const longTermMA = calculateMA(history.slice(-30));
-    
     const rsi = calculateRSI(history.slice(-14));
-    
+
     const priceChange = ((latest.close - history[0].close) / history[0].close) * 100;
-    
     const avgVolume = history.reduce((sum, day) => sum + day.volume, 0) / history.length;
     const volumeTrend = latest.volume > avgVolume ? 'HIGH' : 'LOW';
-    
+
     let action = 'HOLD';
     let confidence = 'MEDIUM';
     let reason = '';
-    
+
     if (shortTermMA > mediumTermMA && mediumTermMA > longTermMA && rsi < 70 && priceChange > 0) {
       action = 'BUY';
       reason = 'Upward trend with positive momentum and not overbought';
-      
       if (rsi < 50 && volumeTrend === 'HIGH') {
         confidence = 'HIGH';
         reason += '. Potential entry point with high volume support';
       }
-    }
-    else if (shortTermMA < mediumTermMA && mediumTermMA < longTermMA && rsi > 30 && priceChange < 0) {
+    } else if (shortTermMA < mediumTermMA && mediumTermMA < longTermMA && rsi > 30 && priceChange < 0) {
       action = 'SELL';
       reason = 'Downward trend with negative momentum and not oversold';
-      
       if (rsi > 50 && volumeTrend === 'HIGH') {
         confidence = 'HIGH';
         reason += '. Strong selling pressure with high volume';
       }
-    }
-    else if (rsi > 70) {
+    } else if (rsi > 70) {
       action = 'SELL';
       confidence = rsi > 80 ? 'HIGH' : 'MEDIUM';
       reason = `Stock appears overbought with RSI at ${rsi.toFixed(2)}`;
-    }
-    // Oversold
-    else if (rsi < 30) {
+    } else if (rsi < 30) {
       action = 'BUY';
       confidence = rsi < 20 ? 'HIGH' : 'MEDIUM';
       reason = `Stock appears oversold with RSI at ${rsi.toFixed(2)}`;
-    }
-    
-    else {
+    } else {
       reason = 'Mixed signals suggest holding current position';
     }
-    
+
     setRecommendation({ action, confidence, reason });
   };
-  
-  const calculateMA = (data) => {
-    if (!data || data.length === 0) return 0;
-    return data.reduce((sum, day) => sum + day.close, 0) / data.length;
-  };
+
+  const calculateMA = (data) =>
+    data.reduce((sum, day) => sum + day.close, 0) / data.length || 0;
 
   const calculateRSI = (data) => {
-    if (!data || data.length < 2) return 50;
-    
-    let gains = 0;
-    let losses = 0;
-    
+    if (data.length < 2) return 50;
+    let gains = 0, losses = 0;
     for (let i = 1; i < data.length; i++) {
-      const difference = data[i].close - data[i-1].close;
-      if (difference > 0) {
-        gains += difference;
-      } else {
-        losses -= difference;
-      }
+      const diff = data[i].close - data[i - 1].close;
+      if (diff > 0) gains += diff; else losses -= diff;
     }
-    
     if (losses === 0) return 100;
-    
-    const relativeStrength = gains / losses;
-    return 100 - (100 / (1 + relativeStrength));
+    const rs = gains / losses;
+    return 100 - (100 / (1 + rs));
   };
 
   const updateRecentSearches = (symbol) => {
-    setRecentSearches(prev => {
-      const filtered = prev.filter(s => s !== symbol);
-      return [symbol, ...filtered].slice(0, 5);
-    });
+    setRecentSearches(prev => [symbol, ...prev.filter(s => s !== symbol)].slice(0, 5));
   };
 
-  const formatDate = (dateString) => {
-    const options = { year: 'numeric', month: 'short', day: 'numeric' };
-    return new Date(dateString).toLocaleDateString(undefined, options);
-  };
-
-  const formatPrice = (price) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(price);
-  };
-
-  const formatPercent = (value) => {
-    return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
-  };
-
-  const getActionClass = (action) => {
-    if (action === 'BUY') return 'buy-action';
-    if (action === 'SELL') return 'sell-action';
-    return 'hold-action';
-  };
-  
-  const getConfidenceClass = (confidence) => {
-    if (confidence === 'HIGH') return 'high-confidence';
-    if (confidence === 'MEDIUM') return 'medium-confidence';
-    return 'low-confidence';
-  };
-
-  const getPriceChangeClass = (value) => {
-    if (value > 0) return 'price-positive';
-    if (value < 0) return 'price-negative';
-    return 'price-neutral';
-  };
+  const formatDate = (d) => new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  const formatPrice = (p) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(p);
+  const formatPercent = (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+  const getActionClass = (a) => a === 'BUY' ? 'buy-action' : a === 'SELL' ? 'sell-action' : 'hold-action';
+  const getConfidenceClass = (c) => c === 'HIGH' ? 'high-confidence' : c === 'MEDIUM' ? 'medium-confidence' : 'low-confidence';
+  const getPriceChangeClass = (v) => v > 0 ? 'price-positive' : v < 0 ? 'price-negative' : 'price-neutral';
 
   return (
-    
     <div className="app-container">
-      
-   <img src={logoImage} alt="True Dalal Logo" className="app-logo" />
+      <img src={logoImage} alt="True Dalal Logo" className="app-logo" />
       <header className="app-header">
-      <div className="logo-title-container">
-    <h3 className="app-head">True Dalal</h3><br />
-    <h3 className="app-title"> "<i>Always the right suggestion and choice for you</i>"</h3>
-  </div>
+        <div className="logo-title-container">
+          <h3 className="app-head">True Dalal</h3><br />
+          <h3 className="app-title">"<i>Always the right suggestion and choice for you</i>"</h3>
+        </div>
         <p className="app-subtitle">Intelligent buy/sell recommendations powered by technical analysis</p>
       </header>
 
@@ -236,22 +169,8 @@ export default function StockGuidanceApp() {
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             className="search-input"
           />
-          <button
-            onClick={() => fetchStockData(symbol)}
-            disabled={loading}
-            className="search-button"
-          >
-            {loading ? (
-              <>
-                <RefreshCw className="loading-icon" size={18} />
-                <span>Loading...</span>
-              </>
-            ) : (
-              <>
-                <Search size={18} />
-                <span>Analyze Stock</span>
-              </>
-            )}
+          <button onClick={() => fetchStockData(symbol)} disabled={loading} className="search-button">
+            {loading ? (<><RefreshCw className="loading-icon" size={18} /><span>Loading...</span></>) : (<><Search size={18} /><span>Analyze Stock</span></>)}
           </button>
         </div>
 
@@ -260,16 +179,7 @@ export default function StockGuidanceApp() {
             <p className="recent-searches-title">Recent searches:</p>
             <div className="recent-searches-list">
               {recentSearches.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setSymbol(s);
-                    fetchStockData(s);
-                  }}
-                  className="recent-search-btn"
-                >
-                  {s}
-                </button>
+                <button key={s} onClick={() => { setSymbol(s); fetchStockData(s); }} className="recent-search-btn">{s}</button>
               ))}
             </div>
           </div>
@@ -282,54 +192,30 @@ export default function StockGuidanceApp() {
           </div>
         )}
       </div>
-      
-      <PopularStockCategories onSelectStock={(symbol) => {
-        setSymbol(symbol);
-        fetchStockData(symbol);
-      }} />
+
+      <PopularStockCategories onSelectStock={(s) => { setSymbol(s); fetchStockData(s); }} />
 
       {stockData && (
         <div className="info-grid">
           <div className="card">
-            <h2 className="card-title">
-              <DollarSign size={18} className="inline-icon" /> 
-              {stockData.symbol} Overview
-            </h2>
+            <h2 className="card-title"><DollarSign size={18} className="inline-icon" /> {stockData.symbol} Overview</h2>
             <div className="stock-overview">
-              <div className="data-row">
-                <span className="data-label">Date</span>
-                <span className="data-value">{formatDate(stockData.date)}</span>
-              </div>
-              <div className="data-row">
-                <span className="data-label">Open</span>
-                <span className="data-value">{formatPrice(stockData.open)}</span>
-              </div>
-              <div className="data-row">
-                <span className="data-label">Close</span>
-                <span className="data-value">{formatPrice(stockData.close)}</span>
-              </div>
-              <div className="data-row">
-                <span className="data-label">High</span>
-                <span className="data-value">{formatPrice(stockData.high)}</span>
-              </div>
-              <div className="data-row">
-                <span className="data-label">Low</span>
-                <span className="data-value">{formatPrice(stockData.low)}</span>
-              </div>
-              <div className="data-row">
-                <span className="data-label">Volume</span>
-                <span className="data-value">{stockData.volume.toLocaleString()}</span>
-              </div>
+              {['date', 'open', 'close', 'high', 'low', 'volume'].map((key) => (
+                <div key={key} className="data-row">
+                  <span className="data-label">{key[0].toUpperCase() + key.slice(1)}</span>
+                  <span className="data-value">
+                    {key === 'date' ? formatDate(stockData[key]) :
+                      key === 'volume' ? stockData[key].toLocaleString() : formatPrice(stockData[key])}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
 
           <div className="card recommendation-container">
             {recommendation && (
               <>
-                <h2 className="card-title">
-                  <Activity size={18} className="inline-icon" /> 
-                  Recommendation
-                </h2>
+                <h2 className="card-title"><Activity size={18} className="inline-icon" /> Recommendation</h2>
                 <div className="recommendation-header">
                   <div className={`recommendation-action ${getActionClass(recommendation.action)}`}>
                     {recommendation.action === 'BUY' && <TrendingUp size={24} />}
@@ -342,15 +228,6 @@ export default function StockGuidanceApp() {
                   </span>
                 </div>
                 <p className="recommendation-reason">{recommendation.reason}</p>
-                
-                <div className="analysis-info">
-                  <p className="analysis-info-title">Analysis based on:</p>
-                  <ul className="analysis-info-list">
-                    <li>Technical indicators from the last 30 days</li>
-                    <li>Price movement patterns and volume analysis</li>
-                    <li>Relative strength index (RSI) and moving averages</li>
-                  </ul>
-                </div>
               </>
             )}
           </div>
@@ -359,30 +236,14 @@ export default function StockGuidanceApp() {
 
       {history.length > 0 && (
         <div className="card history-card">
-          <h2 className="card-title">
-            <BarChart2 size={18} className="inline-icon" /> 
-            Price History (Last 10 Days)
-          </h2>
+          <h2 className="card-title"><BarChart2 size={18} className="inline-icon" /> Price History (Last 10 Days)</h2>
           <div className="table-container">
             <table className="price-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Open</th>
-                  <th>Close</th>
-                  <th>High</th>
-                  <th>Low</th>
-                  <th>Volume</th>
-                  <th>Change</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Date</th><th>Open</th><th>Close</th><th>High</th><th>Low</th><th>Volume</th><th>Change</th></tr></thead>
               <tbody>
-                {history.slice(-10).map((day, index, arr) => {
-                  const prevDay = index > 0 ? arr[index - 1] : null;
-                  const changePercent = prevDay 
-                    ? ((day.close - prevDay.close) / prevDay.close) * 100 
-                    : 0;
-                  
+                {history.slice(-10).map((day, i, arr) => {
+                  const prev = i > 0 ? arr[i - 1] : null;
+                  const change = prev ? ((day.close - prev.close) / prev.close) * 100 : 0;
                   return (
                     <tr key={day.date}>
                       <td>{formatDate(day.date)}</td>
@@ -391,9 +252,7 @@ export default function StockGuidanceApp() {
                       <td>{formatPrice(day.high)}</td>
                       <td>{formatPrice(day.low)}</td>
                       <td>{day.volume.toLocaleString()}</td>
-                      <td className={getPriceChangeClass(changePercent)}>
-                        {formatPercent(changePercent)}
-                      </td>
+                      <td className={getPriceChangeClass(change)}>{formatPercent(change)}</td>
                     </tr>
                   );
                 })}
@@ -405,7 +264,7 @@ export default function StockGuidanceApp() {
 
       <footer className="app-footer">
         <p className="footer-disclaimer">
-          Stock data provided by MarketStack API. Recommendations are based on technical analysis and should be used for informational purposes only.
+          Stock data provided by MarketStack API through our backend. Recommendations are based on technical analysis and should be used for informational purposes only.
         </p>
         <p>Copyright © {new Date().getFullYear()} TrueDalal</p>
       </footer>
